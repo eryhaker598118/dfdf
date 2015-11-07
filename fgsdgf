@@ -1,0 +1,361 @@
+    function drawRescaledItems(ctx) {
+        if (showVisualCues && isPlayerAlive()) {
+            drawMapBorders(ctx);
+            drawGrazingLines_old(ctx);
+            drawGrazingLines(ctx);
+            if(cobbler.drawTail){
+                drawTrailTail(ctx);
+            }
+
+
+            drawSplitGuide(ctx, getSelectedBlob());
+            drawMiniMap();
+        }
+    }
+
+    function getScoreBoardExtrasString(F) {
+        var extras = " ";
+        if (showVisualCues) {
+            highScore = Math.max(highScore, ~~(F / 100));
+            extras += " High: " + highScore.toString();
+            if (isPlayerAlive()) {
+                extras += "" + isPlayerAlive() ? " Alive: " + (~~((Date.now() - timeSpawned) / 1000)).toString() : "";
+            }
+        }
+        return extras;
+    }
+
+    function drawCellInfos(noColors, ctx) {
+        var color = this.color;
+        if (showVisualCues) {
+            color = setCellColors(this, zeach.myPoints);
+            if (this.isVirus) {
+                if (!zeach.allNodes.hasOwnProperty(nearestVirusID))
+                    nearestVirusID = this.id;
+                else if (distanceFromCellZero(this) < distanceFromCellZero(zeach.allNodes[nearestVirusID]))
+                    nearestVirusID = this.id;
+            }
+            if(noColors) {
+                ctx.fillStyle = "#FFFFFF";
+                ctx.strokeStyle = "#AAAAAA"
+            }
+            else {
+                ctx.fillStyle = color;
+                ctx.strokeStyle = (this.id == nearestVirusID) ? "red" : color
+            }
+        }
+    }
+
+    function drawMapBorders(ctx) {
+        if (zeach.isNightMode) {
+            ctx.strokeStyle = '#FFFFFF';
+        }
+        ctx.beginPath();
+        ctx.moveTo(zeach.mapLeft, zeach.mapTop);        // 0
+        ctx.lineTo(zeach.mapRight, zeach.mapTop);       // >
+        ctx.lineTo(zeach.mapRight, zeach.mapBottom);    // V
+        ctx.lineTo(zeach.mapLeft, zeach.mapBottom);     // <
+        ctx.lineTo(zeach.mapLeft, zeach.mapTop);        // ^
+        ctx.stroke();
+    }
+
+    function drawSplitGuide(ctx, cell) {
+        if( !isPlayerAlive() || !cobbler.splitGuide){
+            return;
+        }
+        var radius = 660;
+        var centerX = cell.x;
+        var centerY = cell.y;
+        var hold = ctx.globalAlpha;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius+cell.size, 0, 2 * Math.PI, false);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#FF0000';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI, false);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#00FF00';
+        ctx.stroke();
+        ctx.globalAlpha = hold;
+    }
+
+    function isTeamMode(){
+        return (zeach.gameMode === ":teams");
+    }
+    function setCellColors(cell,myPoints){
+        if(!showVisualCues){
+            return cell.color;
+        }
+        if(cobbler.rainbowPellets && isFood(cell)){
+            return cell.color;
+        }
+        var color = cell.color;
+        if (myPoints.length > 0 && !isTeamMode()) {
+            var size_this =  getMass(cell.size);
+            var size_that =  ~~(getSelectedBlob().size * getSelectedBlob().size / 100);
+            if (cell.isVirus || myPoints.length === 0) {
+                color = virusColor;
+            } else if (~myPoints.indexOf(cell)) {
+                color = myColor;
+            } else if (size_this > size_that * Huge) {
+                color = Huge_Color;
+            } else if (size_this > size_that * Large) {
+                color = Large_Color;
+            } else if (size_this > size_that * Small) {
+                color = Same_Color;
+            } else if (size_this > size_that * Tiny) {
+                color = Small_Color;
+            } else {
+                color = Tiny_Color;
+            }
+        }
+        return color;
+    }
+
+    function displayDebugText(ctx, agarTextFunction) {
+
+        if(0 >= cobbler.debugLevel) {
+            return;
+        }
+
+        var textSize = 15;
+        var debugStrings = [];
+        if(1 <= cobbler.debugLevel) {
+            debugStrings.push("v " + _version_);
+            debugStrings.push("Server: " + serverIP);
+
+            debugStrings.push(cobbler.KeyNewGrazer + " - " + "Grazing: " + (isGrazing ? (1 == isGrazing) ? "Old" : "New" : "Off"));
+        }
+        if(2 <= cobbler.debugLevel) {
+            debugStrings.push(cobbler.KeySuspendMouse + " - " + "Suspend mouse: " + (suspendMouseUpdates ? "On" : "Off"));
+            debugStrings.push(cobbler.KeyGrazingFix + " - " + "Grazing target fixation :" + (grazingTargetFixation ? "On" : "Off"));
+            if(grazingTargetFixation){ debugStrings.push("  (T) to retarget");}
+            debugStrings.push(cobbler.KeyRightClick + " - " + "Right click: " + (cobbler.rightClickFires ? "Fires @ virus" : "Default"))
+            debugStrings.push(cobbler.KeyZoomFactor + " - " + "Zoom: " + zoomFactor.toString());
+            if (isPlayerAlive()) {
+                debugStrings.push("Location: " + Math.floor(getSelectedBlob().x) + ", " + Math.floor(getSelectedBlob().y));
+            }
+
+        }
+        var offsetValue = 20;
+        var text = new agarTextFunction(textSize, (zeach.isNightMode ? '#F2FBFF' : '#111111'));
+
+        for (var i = 0; i < debugStrings.length; i++) {
+            text.setValue(debugStrings[i]); // setValue
+            var textRender = text.render();
+            ctx.drawImage(textRender, 20, offsetValue);
+            offsetValue += textRender.height;
+        }
+    }
+
+    // Probably isn't necessary to throttle it ... but what the hell.
+    var rescaleMinimap = _.throttle(function(){
+        var minimapScale = cobbler.miniMapScaleValue;
+        var scaledWidth = ~~(zeach.mapWidth/minimapScale);
+        var scaledHeight = ~~(zeach.mapHeight/minimapScale);
+        var minimap = jQuery("#mini-map");
+
+        if(minimap.width() != scaledWidth || minimap.height() != scaledHeight || cobbler.minimapScaleCurrentValue != minimapScale){
+            // rescale the div
+            minimap.width(scaledWidth);
+            minimap.height(scaledHeight);
+            // rescale the canvas element
+            minimap[0].width = scaledWidth;
+            minimap[0].height = scaledHeight;
+            cobbler.minimapScaleCurrentValue = minimapScale;
+        }
+    }, 5*1000);
+
+    function drawMiniMap() {
+        rescaleMinimap();
+        var minimapScale = cobbler.miniMapScaleValue;
+        miniMapCtx.clearRect(0, 0, ~~(zeach.mapWidth/minimapScale), ~~(zeach.mapHeight/minimapScale));
+
+        _.forEach(_.values(getOtherBlobs()), function(blob){
+            miniMapCtx.strokeStyle = blob.isVirus ?  "#33FF33" : 'rgb(52,152,219)' ;
+            miniMapCtx.beginPath();
+            miniMapCtx.arc((blob.nx+Math.abs(zeach.mapLeft)) / minimapScale, (blob.ny+Math.abs(zeach.mapTop)) / minimapScale, blob.size / minimapScale, 0, 2 * Math.PI);
+            miniMapCtx.stroke();
+        });
+
+        _.forEach(zeach.myPoints, function(myBlob){
+            miniMapCtx.strokeStyle = "#FFFFFF";
+            miniMapCtx.beginPath();
+            miniMapCtx.arc((myBlob.nx+Math.abs(zeach.mapLeft)) / minimapScale, (myBlob.ny+Math.abs(zeach.mapTop)) / minimapScale, myBlob.size / minimapScale, 0, 2 * Math.PI);
+            miniMapCtx.stroke();
+        });
+    }
+    function drawLine(ctx, point1, point2, color){
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(point1.x, point1.y);
+        ctx.lineTo(point2.x, point2.y);
+        ctx.stroke();
+    }
+
+    function drawGrazingLines(ctx) {
+        if(!isGrazing || !cobbler.visualizeGrazing ||  !isPlayerAlive())
+        {
+            //console.log("returning early");
+            return;
+        }
+        var oldLineWidth = ctx.lineWidth;
+        var oldColor = ctx.color;
+        var oldGlobalAlpha = ctx.globalAlpha;
+
+        zeach.myPoints.forEach(function(playerBlob) {
+            if(!playerBlob.grazeInfo || playerBlob.grazingMode != 2) {
+                return;
+            }
+            var grazeInfo = playerBlob.grazeInfo;
+
+            var nullVec = { x: 0, y: 0 };
+            var cumulatives = grazeInfo.cumulatives;
+            var maxSize = 0.001;
+
+            // Render threat forces
+            grazeInfo.per_threat.forEach(function (grazeVec){
+                var element = zeach.allNodes[grazeVec.id];
+
+                if(!element) return; //Wall or dead or something
+
+                //drawLine(ctx,element, playerBlob, "red" );
+                //drawLine(ctx,element, {x: element.x + grazeVec.x / maxSize, y: element.y + grazeVec.y / maxSize }, "red" );
+                drawLine(ctx,playerBlob, {x: playerBlob.x + grazeVec.x / maxSize, y: playerBlob.y + grazeVec.y / maxSize }, "red" );
+
+                var grazeVecLen = Math.sqrt(grazeVec.x * grazeVec.x + grazeVec.y * grazeVec.y);
+
+                ctx.globalAlpha = 0.5 / zeach.myPoints.length;
+                ctx.beginPath();
+                ctx.arc(element.x, element.y, grazeVecLen / maxSize / 20, 0, 2 * Math.PI, false);
+                ctx.fillStyle = 'red';
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            });
+
+            if(zeach.myPoints.length <= 1) {
+                // If we're not fragmented, render fancy food forces
+                grazeInfo.per_food.forEach(function (grazeVec){
+                    var element = zeach.allNodes[grazeVec.id];
+
+                    if(!element) return; //Wall or dead or something
+
+                    //drawLine(ctx,element, playerBlob, "white" );
+                    drawLine(ctx,element, {x: element.x + grazeVec.x / maxSize, y: element.y + grazeVec.y / maxSize }, "green" );
+                    //drawLine(ctx,playerBlob, {x: playerBlob.x + grazeVec.x / maxSize, y: playerBlob.y + grazeVec.y / maxSize }, "green" );
+                });
+            }
+
+            // Prepare to render cumulatives
+            maxSize *= grazeInfo.per_threat.length + grazeInfo.per_food.length;
+            maxSize /= 10;
+
+            ctx.lineWidth = 10;
+
+            // Render summary force without special forces, like walls
+            drawLine(ctx,playerBlob,
+                {
+                    x: playerBlob.x + (cumulatives[0].x + cumulatives[1].x) / maxSize,
+                    y: playerBlob.y + (cumulatives[0].y + cumulatives[1].y) / maxSize,
+                }, "gray"
+            );
+
+            // Render foods and threats force cumulatives
+            drawLine(ctx,playerBlob, {x: playerBlob.x + cumulatives[1].x / maxSize, y: playerBlob.y + cumulatives[1].y / maxSize }, "green" );
+            drawLine(ctx,playerBlob, {x: playerBlob.x + cumulatives[0].x / maxSize, y: playerBlob.y + cumulatives[0].y / maxSize }, "red" );
+
+            // Render summary force with special forces, like walls
+            ctx.lineWidth = 5;
+            drawLine(ctx,playerBlob, {x: playerBlob.x + (grazeInfo.fx) / maxSize, y: playerBlob.y + (grazeInfo.fy) / maxSize }, "orange" );
+            ctx.lineWidth = 1;
+            drawLine(ctx,playerBlob, {x: playerBlob.x + 300 * (grazeInfo.fx) / maxSize, y: playerBlob.y + 300 * (grazeInfo.fy) / maxSize }, "orange" );
+        });
+
+        var viewport = getViewport(true);
+
+        // Render sent mouse coords as a small circle
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(lastMouseCoords.x, lastMouseCoords.y, 0.01 * viewport.dx, 0, 2 * Math.PI, false);
+        ctx.fillStyle = 'red';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = zeach.isNightMode ? '#FFFFFF' : '#000000';
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Render viewport borders, useful for blob lookout and 10-sec-memoization debugging
+        ctx.strokeStyle = zeach.isNightMode ? '#FFFFFF' : '#000000';
+        ctx.lineWidth = 5;
+
+        ctx.beginPath();
+        ctx.moveTo(viewport.x - viewport.dx, viewport.y - viewport.dy);
+        ctx.lineTo(viewport.x + viewport.dx, viewport.y - viewport.dy);
+        ctx.lineTo(viewport.x + viewport.dx, viewport.y + viewport.dy);
+        ctx.lineTo(viewport.x - viewport.dx, viewport.y + viewport.dy);
+        ctx.lineTo(viewport.x - viewport.dx, viewport.y - viewport.dy);
+        ctx.stroke();
+
+        ctx.globalAlpha = oldGlobalAlpha;
+        ctx.lineWidth = oldLineWidth;
+        ctx.color = oldColor;
+    }
+
+    function drawTrailTail(ctx) {
+        // Render trailing tail that indicates real movement,
+        // based on the difference between client-interpolated and real coords.
+        var trailScale = 5;
+        zeach.myPoints.forEach(function(playerBlob) {
+            var d = { x: playerBlob.nx - playerBlob.x, y: playerBlob.ny - playerBlob.y };
+            drawLine(ctx,playerBlob, {x: playerBlob.x - d.x * trailScale, y: playerBlob.y - d.y * trailScale }, myColor );
+            //drawLine(ctx,{x: playerBlob.ox, y: playerBlob.oy }, {x: playerBlob.nx, y: playerBlob.ny }, "green" );
+        });
+    }
+
+    function drawGrazingLines_old(ctx) {
+        if(!isGrazing || !cobbler.visualizeGrazing ||  !isPlayerAlive())
+        {
+            //console.log("returning early");
+            return;
+        }
+        var oldLineWidth = ctx.lineWidth;
+        var oldColor = ctx.color;
+        
+        ctx.lineWidth = 10;
+        for(var i = 0; i < zeach.myPoints.length; i++) {
+            var point = zeach.myPoints[i];
+            if (point.grazingMode != 1) {
+                continue;
+            }
+        
+            if(_.has(zeach.allNodes, point.grazingTargetID)){
+                drawLine(ctx, zeach.allNodes[point.grazingTargetID], point, "green");
+            }
+        }
+        
+        ctx.lineWidth = 2;
+        for(var i = 0; i < zeach.myPoints.length; i++) {
+            var point = zeach.myPoints[i];
+            if (point.grazingMode != 1) {
+                continue;
+            }
+            zeach.allItems.forEach(function (element){
+                if (!element.isSafeTarget) {
+                } else if(element.isSafeTarget[point.id] === true) {
+                    drawLine(ctx, element, point, "white" );
+                } else if (element.isSafeTarget[point.id] === false) {
+                    drawLine(ctx, element, point, "red" );
+                } else {
+                    //drawLine(ctx,element, getSelectedBlob(), "blue" );
+                }
+            })
+        }
+        ctx.lineWidth = oldLineWidth;
+        ctx.color = oldColor;
+
+    }
